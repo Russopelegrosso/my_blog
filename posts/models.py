@@ -23,7 +23,8 @@ class Post(models.Model):
     group = models.ForeignKey(Group, on_delete=models.SET_NULL,
                               related_name='posts', blank=True, null=True,
                               verbose_name='Группа')
-    image = models.ImageField(upload_to='posts/', blank=True, null=True)
+    image = models.ImageField(upload_to='posts/', blank=True, null=True,
+                              verbose_name='Изображение')
 
     class Meta:
         ordering = ['-pub_date']
@@ -40,7 +41,7 @@ class Comment(models.Model):
     author = models.ForeignKey(User, on_delete=models.CASCADE,
                                related_name='comments')
     text = models.TextField(verbose_name='Комментарий')
-    created = models.DateTimeField('date published', auto_now_add=True)
+    created = models.DateTimeField('Дата публикации', auto_now_add=True)
 
     def __str__(self):
         return self.text

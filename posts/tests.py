@@ -1,23 +1,23 @@
-from django.core.cache import cache
-from django.test import TestCase, Client
 from django.contrib.auth import get_user_model
-from django.urls import reverse
-from .models import Post, Group, Follow
+from django.core.cache import cache
 from django.core.files import File
+from django.test import TestCase, Client
+from django.urls import reverse
+
+from .models import Post, Group, Follow
+
+import mock
 
 User = get_user_model()
 
 
-class TestPost(TestCase):
-
-    def setUp(self):
+class DefaultSetUp(TestCase):
+    def defaultSetUp(self):
+        cache.clear()
         self.auth_client = Client()
         self.client_logout = Client()
         self.user = User.objects.create_user(
             username='Barney',
-        )
-        self.other_user = User.objects.create_user(
-            username='Lola',
         )
         self.auth_client.force_login(self.user)
         self.group = Group.objects.create(
@@ -25,13 +25,18 @@ class TestPost(TestCase):
             slug='testgroup'
         )
 
+
+class TestPost(DefaultSetUp):
+
+    def setUp(self):
+        self.defaultSetUp()
+
     def test_profile(self):
         response = self.client_logout.get(
             reverse('profile', kwargs=dict(username=self.user.username)))
         self.assertEqual(response.status_code, 200)
 
     def test_new_post(self):
-        cache.clear()
         response = self.auth_client.post(reverse('new_post'),
                                          data={'text': 'post for test'})
         self.assertEqual(response.status_code, 302)
@@ -47,17 +52,19 @@ class TestPost(TestCase):
         self.assertRedirects(response, '/auth/login/?next=/new/', 302)
 
     def test_post_published(self):
-        cache.clear()
-        with open('media/posts/25990_002.jpg', 'rb') as img:
-            post = Post.objects.create(text='test text', author=self.user,
-                                       group=self.group, image=File(img))
+        image = mock.MagicMock(spec=File)
+        image.name = 'test_image.jpg'
+        post = Post.objects.create(text='test text', author=self.user,
+                                   group=self.group,
+                                   image=image)
+        self.assertEqual(Post.objects.count(), 1)
         self.check_all_page(post.id, post.text, post.author, post.group)
 
     def test_post_edit(self):
-        cache.clear()
-        with open('media/posts/25990_002.jpg', 'rb') as img:
-            post = Post.objects.create(text='test text', author=self.user,
-                                       group=self.group, image=File(img))
+        image = mock.MagicMock(spec=File)
+        image.name = 'test_image_p.jpg'
+        post = Post.objects.create(text='test text', author=self.user,
+                                   group=self.group, image=image)
         edit_text = 'edit test text'
         post_id = post.id
         new_group = Group.objects.create(
@@ -74,7 +81,25 @@ class TestPost(TestCase):
             ),
             data={'group': new_group.id, 'text': edit_text}
         )
-        self.check_all_page(post.id, edit_text, post.author, new_group)
+
+    def test_load_not_image(self):
+        image = mock.MagicMock(spec=File)
+        image.name = 'test_image_p.doc'
+        response = self.auth_client.post(
+            reverse(
+                'new_post',
+            ),
+            data={'group': self.group.id, 'text': 'text',
+                  'author': self.auth_client, 'image': image}, follow=True
+        )
+        posts_count = Post.objects.count()
+        self.assertFormError(
+            response, form='form', field='image',
+            errors='Загрузите правильное изображение. '
+                   'Файл, который вы загрузили, поврежден'
+                   ' или не является изображением.'
+        )
+        self.assertEqual(posts_count, 0)
 
     def check_all_page(self, post_id, text, author, group):
         for url in (
@@ -85,19 +110,25 @@ class TestPost(TestCase):
                     'post_id': post_id,
                 }),
         ):
-            response = self.auth_client.get(url)
-            self.assertContains(response, 'img')
-            if 'paginator' in response.context:
-                posts = response.context['paginator'].object_list[0]
-                self.assertEqual(Post.objects.count(), 1)
-            else:
-                posts = response.context['post']
-            self.assertEqual(posts.text, text)
-            self.assertEqual(posts.author, author)
-            self.assertEqual(posts.group, group)
+            with self.subTest(url=url):
+                response = self.auth_client.get(url)
+                self.assertContains(response, 'img')
+                if 'paginator' in response.context:
+                    posts = response.context['paginator'].object_list[0]
+                    self.assertEqual(Post.objects.count(), 1)
+                else:
+                    posts = response.context['post']
+                self.assertEqual(posts.text, text)
+                self.assertEqual(posts.author, author)
+                self.assertEqual(posts.group, group)
+
+
+class TestErrorPage(DefaultSetUp):
+    def setUp(self):
+        self.defaultSetUp()
 
     def test_404(self):
-        response = self.client.get('/not-found/')
+        response = self.auth_client.get('/not-found/')
         self.assertEqual(response.status_code, 404)
 
     def test_cache_index(self):
@@ -111,24 +142,40 @@ class TestPost(TestCase):
         )
         self.assertNotContains(response, 'cache test')
 
-    def test_follow_and_unfollow(self):
-        before_follow = Follow.objects.all().count()
+
+class TestFollow(DefaultSetUp):
+    def setUp(self):
+        self.defaultSetUp()
+        self.other_user = User.objects.create_user(
+            username='Lola',
+        )
+
+    def test_follow(self):
+        before_follow = Follow.objects.count()
         Follow.objects.create(
             user=User.objects.get(
                 username=self.user),
             author=User.objects.get(
                 username=self.other_user.username))
+        after_follow = Follow.objects.count()
+        self.assertEqual(before_follow + 1, after_follow)
 
-        follower = Follow.objects.filter(
+    def test_unfollow(self):
+        before_follow = Follow.objects.count()
+        Follow.objects.create(
             user=User.objects.get(
                 username=self.user),
             author=User.objects.get(
                 username=self.other_user.username))
-        after_follow = Follow.objects.all().count()
-        self.assertEqual(before_follow + 1, after_follow)
-        follower.delete()
-        after_unfollow = Follow.objects.all().count()
-        self.assertEqual(after_follow - 1, after_unfollow)
+        follow = Follow.objects.count()
+        self.assertEqual(before_follow + 1, follow)
+        Follow.objects.filter(
+            user=User.objects.get(
+                username=self.user),
+            author=User.objects.get(
+                username=self.other_user.username)).delete()
+        after_unfollow = Follow.objects.count()
+        self.assertEqual(before_follow, after_unfollow)
 
     def test_post_following(self):
         Post.objects.create(text='Follower text', author=self.other_user)
@@ -160,4 +207,3 @@ class TestPost(TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'comment test')
-
