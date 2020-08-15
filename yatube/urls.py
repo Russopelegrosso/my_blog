@@ -12,6 +12,10 @@ handler500 = "posts.views.server_error"  # noqa
 
 urlpatterns = [
     path('about/', include('django.contrib.flatpages.urls')),
+    path('about-author/',  include('django.contrib.flatpages.urls'),
+         name='author'),
+    path('about-spec/', views.flatpage, {'url': '/about-spec/'},
+         name='spec'),
     path("auth/", include("users.urls")),
     path("auth/", include("django.contrib.auth.urls")),
     path('admin/', admin.site.urls),
@@ -24,8 +28,7 @@ urlpatterns += [
              name='about'),
         path('terms/', views.flatpage, {'url': '/terms/'},
              name='terms'),
-        # path('about-author/', views.flatpage, {'url': '/about-author/'},
-        #      name='author'),
+
         # path('about-spec/', views.flatpage, {'url': '/about-spec/'},
         #      name='spec'),
 ]
